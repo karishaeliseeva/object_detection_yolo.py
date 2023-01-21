@@ -1,0 +1,57 @@
+from keras.layers import Input, Lambda, Conv2D, MaxPooling2D, BatchNormalization, ELU, Reshape, Concatenate
+from keras.models import Model
+from keras.optimizers import Adam
+from keras.callbacks import TensorBoard, ModelCheckpoint, ReduceLROnPlateau, EarlyStopping
+from keras.utils import multi_gpu_model
+import numpy as np
+
+# Load the data
+X_train = np.load('X_train.npy')
+y_train = np.load('y_train.npy')
+X_val = np.load('X_val.npy')
+y_val = np.load('y_val.npy')
+
+# Build the model
+input_image = Input(shape=(416, 16, 3))
+
+# Add the convolutional layers
+x = Conv2D(32, (3,3), padding='same')(input_image)
+x = BatchNormalization()(x)
+x = ELU()(x)
+x = MaxPooling2D(pool_size=(2, 2))(x)
+
+x = Conv2D(64, (3,3), padding='same')(x)
+x = BatchNormalization()(x)
+x = ELU()(x)
+x = MaxPooling2D(pool_size=(2, 2))(x)
+
+x = Conv2D(128, (3,3), padding='same')(x)
+x = BatchNormalization()(x)
+x = ELU()(x)
+
+x = Conv2D(256, (3,3), padding='same')(x)
+x = BatchNormalization()(x)
+x = ELU()(x)
+
+# Add the output layers
+x = Conv2D(5, (1,1), activation='linear')(x)
+output = Reshape((5,))(x)
+
+# Compile the model
+model = Model(input_image, output)
+parallel_model = multi_gpu_model(model, gpus=2)
+parallel_model.compile(loss='mean_squared_error', optimizer=Adam(lr=0.001))
+
+# Create callbacks
+tensorboard = TensorBoard(log_dir='./logs/yolo')
+checkpointer = ModelCheckpoint(filepath='best_model.h5', save_best_only=True)
+reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=3, verbose=1)
+early_stopping = EarlyStopping(monitor='val_loss', min_delta=0, patience=10, verbose=1)
+
+# Fit the model to the data
+parallel_model.fit(X_train, y_train,
+                   batch_size=32,
+                   epochs=100,
+                   verbose=1,
+                   validation_data=(X_val, y_val),
+                   callbacks=[tensorboard, checkpointer, reduce_lr, early_stopping])
